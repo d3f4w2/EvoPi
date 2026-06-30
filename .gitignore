@@ -19,11 +19,12 @@ coverage/
 *.pem
 *.key
 
-# Pi-AgentX runtime data
-.pi/agentx/
+# EvoPi runtime data
+.pi/evopi/
 
 # Nested upstream checkout artifacts
 pi/node_modules/
 pi/packages/*/dist/
 pi/.git/
+
 
