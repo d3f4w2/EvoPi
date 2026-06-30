@@ -2,6 +2,13 @@
 
 EvoPi uses Pi as the base coding agent and adds governance harnesses around the model/tool loop. The open-source projects in `../Pi开源参考项目调研_2026-06-30.md` are treated as design references, not code to vendor.
 
+## 文档规则（项目级约定）
+
+1. **每个决策都要写明「为什么这么选」的理由**。不只写「做什么」，还要写「为什么这样而不是那样」——含权衡、被否方案、依据的事实。每个模块的「最终方案」文档必须包含：**决策 / 实现 / 架构优点 / 少量缺点**，其中「决策」一栏要带理由。
+2. 逐模块讨论，讨论清楚再落文档；进度见 [进度.md](进度.md)（单一进度事实源）。
+3. 文档用中文书写（代码标识符、API 名、路径可保留英文）。
+4. 工作目录是 `D:\evopi`（内层 `pi/` 是只读参考仓库）。
+
 ## Module Stack
 
 | Layer | Module | Purpose | First artifact |
@@ -41,18 +48,19 @@ Additional module state is written as:
 
 ## Document Set
 
-- [Trace Observability Harness](trace-observability-harness.md)
-- [Context Cost Harness](context-cost-harness.md)
-- [Skill Memory Harness](skill-memory-harness.md)
-- [Execution Harness](execution-harness.md)
-- [Tool Runtime Harness](tool-runtime-harness.md)
-- [Eval Collaboration Harness](eval-collaboration-harness.md)
-- [Docs & Productization Harness](docs-productization-harness.md)
-- [Module Backlog](module-backlog.md)
+- [01 Trace 观测机制](01-Trace观测机制.md)
+- [02 上下文成本机制](02-上下文成本机制.md)
+- [03 技能记忆机制](03-技能记忆机制.md)
+- [04 执行治理机制](04-执行治理机制.md)
+- [05 工具运行时机制](05-工具运行时机制.md)
+- [06 评测协作机制](06-评测协作机制.md)
+- [07 文档产品化机制](07-文档产品化机制.md)
+- [模块待办清单](模块待办清单.md)
+- [讨论进度表](进度.md)
 
 ## Using The Trace MVP
 
-Run Pi from `D:\pi-agent` so the project-local extension is discovered from `.pi/extensions/evopi-trace/index.ts`.
+Run Pi from `D:\evopi` so the project-local extension is discovered from `.pi/extensions/evopi-trace/index.ts`.
 
 Available commands:
 
