@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+**/dist/
+*.tsbuildinfo
+
+# Runtime and cache output
+.cache/
+.pytest_cache/
+coverage/
+*.log
+
+# Secrets and local env
+.env
+.env.*
+*.pem
+*.key
+
+# Pi-AgentX runtime data
+.pi/agentx/
+
+# Nested upstream checkout artifacts
+pi/node_modules/
+pi/packages/*/dist/
+pi/.git/
+
