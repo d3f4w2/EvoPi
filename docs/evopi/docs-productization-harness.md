@@ -1,0 +1,40 @@
+# Docs & Productization Harness
+
+## Summary
+
+Docs & Productization Harness keeps EvoPi understandable and demonstrable. Every module needs a concise design document, one demo scenario, and measurable acceptance criteria.
+
+## Documentation Rules
+
+- Each module document should state first-version scope, hooks, data written, and acceptance checks.
+- Prefer behavior-level diagrams over file inventories.
+- Do not claim a metric until trace or tests can produce it.
+- Keep external projects as references and cite their borrowed ideas in prose, not by copying code.
+
+## Demo Requirements
+
+Each module should eventually have:
+
+- A setup command or extension path.
+- A short user task.
+- Expected trace events or output.
+- A success metric.
+- A known limitation.
+
+## Current Demo
+
+Trace Observability MVP:
+
+1. Start Pi from `D:\pi-agent` so `.pi/extensions/evopi-trace/index.ts` is project-local.
+2. Run any prompt that calls a model or tool.
+3. Use `/evopi-trace` for counters.
+4. Use `/evopi-trace path` to locate the JSONL file.
+
+## Acceptance Checks
+
+- Module docs match implemented behavior.
+- Demo steps are runnable from the workspace.
+- Limitations are explicit.
+- Resume-ready project summary can be generated from docs and trace metrics.
+
+

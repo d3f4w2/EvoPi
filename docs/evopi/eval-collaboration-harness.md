@@ -1,0 +1,41 @@
+# Eval Collaboration Harness
+
+## Summary
+
+Eval Collaboration Harness adds subagent collaboration and measurable regression gates. It should be implemented after trace, execution, and tool policy are stable.
+
+## First Version
+
+- Reuse Pi's existing subagent example as the delegation mechanism.
+- Define agent cards with name, purpose, tools, model, budget, and output expectations.
+- Store local golden tasks under `.pi/evopi/evals/`.
+- Score runs using deterministic checks first: command exit codes, test pass/fail, file changes, and required output markers.
+- The MVP implements `/evopi-eval record <name> <score> [notes]` and stores records in `.pi/evopi/evals/runs.jsonl`.
+
+## Pi Hooks
+
+- `registerTool`: expose delegation tools.
+- `tool_call`: apply permission decay to subagents.
+- `tool_result`: collect subagent evidence and score inputs.
+- `appendEntry`: persist eval runs, scores, datasets, and regression decisions.
+
+## Ratchet Rule
+
+No self-evolved prompt, memory, workflow, or skill becomes active only because a model suggested it.
+
+Candidate flow:
+
+1. Trace event creates a candidate.
+2. Candidate is scanned for safety and scope.
+3. Candidate is replayed against a local eval.
+4. Score must improve or preserve baseline.
+5. Human approval enables it.
+6. Rollback metadata is stored.
+
+## Acceptance Checks
+
+- A subagent run has isolated task context and explicit allowed tools.
+- Eval results are tied to trace id and dataset id.
+- Regression gates can reject a candidate.
+- Failed traces can become tests or failure notes without directly modifying behavior.
+

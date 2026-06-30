@@ -1,0 +1,57 @@
+# EvoPi Module Backlog
+
+## Context Cost Harness
+
+Implement after trace. First version should only touch `context`, `before_provider_request`, and `after_provider_response`.
+
+- Build a cache-friendly prompt layout: stable system prompt, stable tool definitions, then volatile task context.
+- Add provider payload summaries to trace: token estimates, cache-control markers, cache read/write fields when available.
+- Add `/evopi-cost` with current context usage and recent request summary.
+- Do not implement codebase RAG until cost traces are visible.
+
+## Skill Memory Harness
+
+Implement after trace and cost.
+
+- Create a Markdown memory tree under `.pi/evopi/memory/`.
+- Store project facts, preferences, workflows, and skill candidates as reviewable Markdown.
+- Route Top-K skill summaries through `context`; keep full skill content on-demand.
+- Persist skill usage stats through `evopi.trace` events and session entries.
+- Candidate skills must include source trace id, eval evidence, approval status, and rollback path.
+
+## Execution Harness
+
+Implement after trace vocabulary is stable.
+
+- Add `/evopi-job` commands for job state, plan, acceptance, and trace.
+- Use `tool_call` as the Policy Gate for risky bash, write, edit, network, and protected paths.
+- Persist approvals and denials as trace events.
+- Add checkpoint hooks around risky mutations before implementing rewind UX.
+
+## Tool Runtime Harness
+
+Implement after Execution policy data exists.
+
+- Start with structured tool errors and budgets before adding remote sandbox backends.
+- Normalize tool failure classes: timeout, auth, schema, permission, rate_limit, tool_bug, unknown.
+- Add MCP broker only after the policy profile shape is stable.
+- Browser verification can be a separate backend capability profile.
+
+## Eval Collaboration Harness
+
+Implement last.
+
+- Reuse Pi's existing subagent example as the first delegation mechanism.
+- Add agent cards with allowed tools, model, budget, and output schema.
+- Store eval cases as local fixtures first.
+- Ratchet rule: a memory, skill, prompt, or workflow candidate is enabled only after replay improves or preserves score.
+
+## Docs & Productization Harness
+
+Maintain continuously.
+
+- Each module gets one design document and one demo script.
+- Each implementation should define a measurable metric before code is merged.
+- Mermaid diagrams should be added only after the behavior is implemented or decision-complete.
+
+

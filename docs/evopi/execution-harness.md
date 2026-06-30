@@ -1,0 +1,40 @@
+# Execution Harness
+
+## Summary
+
+Execution Harness turns a user request into a governed engineering job. It coordinates planning, action, review, approval, checkpointing, and acceptance instead of letting tool calls run as unrelated events.
+
+## First Version
+
+- Add a local job state model: queued, running, waitingApproval, failed, passed, blocked.
+- Add commands:
+  - `/evopi-job` for current job status.
+  - `/evopi-job start <title>` to create a trace-bound job.
+  - `/evopi-job plan <text>` to set the current plan.
+  - `/evopi-job acceptance <text>` to set acceptance criteria.
+- Record risky tool calls and approvals as trace events.
+- Add policy checks before writes, edits, dangerous shell commands, and protected paths.
+
+## Pi Hooks
+
+- `input`: start or update the current job envelope.
+- `tool_call`: run Policy Gate before mutation or risky shell commands.
+- `tool_result`: update job evidence, failures, and acceptance state.
+- `turn_end`: checkpoint current job progress.
+- `appendEntry`: persist job state, approvals, decisions, and checkpoints.
+- `registerCommand`: expose job, plan, checkpoint, rewind, and trace commands.
+
+## Policy Defaults
+
+- Read-only commands are low risk.
+- `write`, `edit`, and shell commands that mutate files are medium risk.
+- Commands touching secrets, git history, package publish, network credentials, or destructive filesystem operations are high risk.
+- High-risk operations require approval and trace recording.
+
+## Acceptance Checks
+
+- A job can be resumed from session entries.
+- Risky tool calls are classified before execution.
+- Approval/denial decisions are traceable.
+- Acceptance status is based on evidence, not final text alone.
+
