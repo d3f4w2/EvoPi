@@ -51,6 +51,7 @@ Examples from this project:
 - An empty `.git` directory is not a valid repository; verify with `git rev-parse` after initialization.
 - Run `.gitignore` setup before broad staging so failed dependency installs do not get committed.
 - Avoid `git add .` when the workspace contains nested repositories such as `pi/`.
+- If a nested repository is only a local upstream checkout/reference, ignore the whole directory, not only its `.git` and generated artifacts.
 - If a nested repo reports dubious ownership, do not change global trust unless the operation truly requires inspecting that nested repo.
 - On Windows, avoid saving `SKILL.md` with a UTF-8 BOM; if validation fails unexpectedly, rerun validation with `PYTHONUTF8=1` and inspect the first bytes/frontmatter.
 

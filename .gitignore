@@ -23,6 +23,7 @@ coverage/
 .pi/evopi/
 
 # Nested upstream checkout artifacts
+pi/
 pi/node_modules/
 pi/packages/*/dist/
 pi/.git/
