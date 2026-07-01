@@ -11,12 +11,13 @@
 //     Policy Gate 的决策函数由本文件的**单一 tool_call handler** 调用（安全>资源，模块 4 先于 5）；旧 /evopi-job MVP 已删除。
 //   - 模块 5（工具运行时）：错误分类 + 延迟 + 预算 + /evopi-tools → tools.ts（createTools）。
 //     预算决策接在单一 tool_call handler 里 policy **之后**（安全>资源）；tool.result 观测迁入 tools.ts。
-//   - 其余模块（eval）MVP 暂留本文件，按各自模块开工时再迁出（模块 6）。
+//   - 模块 6（评测协作）：确定性评分 + golden task + 子代理 spawn + 棘轮门禁 + /evopi-eval → eval.ts（registerEval）。
+//     旧 /evopi-eval MVP（record/list）已被 eval.ts 取代并删除。
+//   V1 六个模块（2/3/4/5/6）全部拆分完毕；index.ts 只做注册 + 单一 tool_call 路由。
 
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerCost } from "./cost";
+import { registerEval } from "./eval";
 import { registerJob } from "./job";
 import { registerMemory } from "./memory";
 import { registerSkill } from "./skill";
@@ -25,45 +26,11 @@ import {
 	type JsonRecord,
 	type Recorder,
 	createRecorder,
-	ensureDir,
 	formatCounts,
-	getEvoPiDir,
 	getTraceFile,
-	isoNow,
 	summarizeMessage,
 	summarizeRecord,
 } from "./trace";
-
-// --- 以下模块（eval）仍是 MVP，等对应模块开工再迁出到各自 .ts ---
-
-interface EvalRecord {
-	id: string;
-	name: string;
-	score: number;
-	notes?: string;
-	traceId: string;
-	timestamp: string;
-}
-
-function getEvalDir(cwd: string): string {
-	return join(getEvoPiDir(cwd), "evals");
-}
-
-function readText(path: string): string {
-	if (!existsSync(path)) return "";
-	return readFileSync(path, "utf8");
-}
-
-function getEvalRunsFile(cwd: string): string {
-	return join(getEvalDir(cwd), "runs.jsonl");
-}
-
-function appendEvalRecord(cwd: string, record: EvalRecord): string {
-	ensureDir(getEvalDir(cwd));
-	const path = getEvalRunsFile(cwd);
-	appendFileSync(path, `${JSON.stringify(record)}\n`, "utf8");
-	return path;
-}
 
 export default function evopiTraceExtension(pi: ExtensionAPI) {
 	const recorder = createRecorder(pi);
@@ -81,6 +48,9 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 
 	// 模块 5：工具运行时 —— 错误分类 + 延迟 + 预算。预算决策接在 policy 之后（安全>资源）；tool.result 观测在 tools.ts。
 	const tools = createTools(shared);
+
+	// 模块 6：评测协作 —— /evopi-eval（确定性评分 / golden task / 子代理 spawn / 棘轮门禁）。
+	registerEval(pi, shared);
 
 	pi.registerCommand("evopi-trace", {
 		description: "Show EvoPi trace status",
@@ -118,47 +88,7 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("evopi-eval", {
-		description: "Record or show EvoPi eval scores",
-		handler: async (args, ctx) => {
-			const trimmed = args.trim();
-			if (trimmed.startsWith("record ")) {
-				const parts = trimmed.slice(7).trim().split(/\s+/);
-				const name = parts[0];
-				const scoreText = parts[1];
-				const score = Number(scoreText);
-				const notes = parts.slice(2).join(" ");
-				if (!name || !Number.isFinite(score)) {
-					ctx.ui.notify("Usage: /evopi-eval record <name> <score> [notes]", "warning");
-					return;
-				}
-				const record: EvalRecord = {
-					id: `eval_${Date.now().toString(36)}`,
-					name,
-					score,
-					notes: notes || undefined,
-					traceId: recorder.state.traceId,
-					timestamp: isoNow(),
-				};
-				const path = appendEvalRecord(ctx.cwd, record);
-				recorder.record("eval.score", ctx, record as unknown as JsonRecord);
-				ctx.ui.notify(`Eval recorded in ${path}`, "info");
-				return;
-			}
-
-			const path = getEvalRunsFile(ctx.cwd);
-			const lines = readText(path).trim().split(/\r?\n/).filter(Boolean);
-			ctx.ui.notify(
-				[
-					`evalRunsFile: ${path}`,
-					`records: ${lines.length}`,
-					"",
-					"Use: /evopi-eval record <name> <score> [notes]",
-				].join("\n"),
-				"info",
-			);
-		},
-	});
+	// /evopi-eval 由 registerEval（eval.ts）注册；旧 MVP（record/list）已删除。
 
 	pi.on("session_start", (event, ctx) => {
 		recorder.reset(ctx.cwd);
