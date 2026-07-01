@@ -1,48 +1,32 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// index.ts — EvoPi 扩展入口。
+// 职责（见 impl/README §5）：读配置 + 依次 registerXxx(pi, shared) + 共享路由。
+// 底座与共享工具在 trace.ts；各模块业务逻辑在各自 <模块>.ts。
+//
+// 迁出记录：
+//   - 模块 1（Trace 底座）：recorder/事件写入/摘要工具 → trace.ts。
+//   - 模块 2（Cost）：/evopi-cost + before/after_provider_request 钩子 → cost.ts（registerCost）。
+//   - 其余模块（memory/job/tools/eval）MVP 暂留本文件，按各自模块开工时再迁出（模块 3/4/5/6）。
+
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerCost } from "./cost";
+import {
+	type JsonRecord,
+	type Recorder,
+	createRecorder,
+	ensureDir,
+	formatCounts,
+	getEvoPiDir,
+	getTraceFile,
+	isoNow,
+	summarizeContent,
+	summarizeMessage,
+	summarizeRecord,
+	summarizeScalar,
+} from "./trace";
 
-const CUSTOM_TYPE = "evopi.trace";
-const SCHEMA_VERSION = 1;
-
-type JsonRecord = Record<string, unknown>;
-
-interface TraceEvent {
-	schemaVersion: 1;
-	traceId: string;
-	eventId: string;
-	type: string;
-	timestamp: string;
-	sessionLeafId?: string;
-	model?: {
-		provider?: string;
-		id?: string;
-		name?: string;
-	};
-	contextUsage?: {
-		tokens: number | null;
-		contextWindow: number;
-		percent: number | null;
-	};
-	data?: JsonRecord;
-}
-
-interface TraceState {
-	traceId: string;
-	sequence: number;
-	startedAt: string;
-	lastEventTypes: string[];
-	counts: Record<string, number>;
-	traceFile?: string;
-}
-
-interface CostState {
-	providerRequests: number;
-	providerResponses: number;
-	lastProviderStatus?: number;
-	lastPayload?: JsonRecord;
-	lastContextUsage?: TraceEvent["contextUsage"];
-}
+// --- 以下模块（memory/job/tools/eval）仍是 MVP，等对应模块开工再迁出到各自 .ts ---
 
 interface ToolStat {
 	calls: number;
@@ -72,39 +56,12 @@ interface EvalRecord {
 	timestamp: string;
 }
 
-function newTraceId(): string {
-	const random = Math.random().toString(36).slice(2, 10);
-	return `tr_${Date.now().toString(36)}_${random}`;
-}
-
-function isoNow(): string {
-	return new Date().toISOString();
-}
-
-function ensureDir(path: string): void {
-	if (!existsSync(path)) {
-		mkdirSync(path, { recursive: true });
-	}
-}
-
-function getTraceDir(cwd: string): string {
-	return join(cwd, ".pi", "evopi", "traces");
-}
-
-function getEvoPiDir(cwd: string): string {
-	return join(cwd, ".pi", "evopi");
-}
-
 function getMemoryDir(cwd: string): string {
 	return join(getEvoPiDir(cwd), "memory");
 }
 
 function getEvalDir(cwd: string): string {
 	return join(getEvoPiDir(cwd), "evals");
-}
-
-function getTraceFile(cwd: string, traceId: string): string {
-	return join(getTraceDir(cwd), `${traceId}.jsonl`);
 }
 
 function readText(path: string): string {
@@ -155,216 +112,13 @@ function appendEvalRecord(cwd: string, record: EvalRecord): string {
 	return path;
 }
 
-function safeJson(value: unknown): unknown {
-	try {
-		JSON.stringify(value);
-		return value;
-	} catch {
-		return "[unserializable]";
-	}
-}
-
-function summarizeScalar(value: unknown): unknown {
-	if (value === null || value === undefined) return value;
-	if (typeof value === "string") return { type: "string", length: value.length };
-	if (typeof value === "number" || typeof value === "boolean") return value;
-	if (Array.isArray(value)) return { type: "array", length: value.length };
-	if (typeof value === "object") return { type: "object", keys: Object.keys(value as JsonRecord).slice(0, 20) };
-	return { type: typeof value };
-}
-
-function summarizeRecord(value: unknown): JsonRecord {
-	if (!value || typeof value !== "object" || Array.isArray(value)) {
-		return { value: summarizeScalar(value) };
-	}
-
-	const record = value as JsonRecord;
-	const summary: JsonRecord = {};
-	for (const key of Object.keys(record).slice(0, 30)) {
-		summary[key] = summarizeScalar(record[key]);
-	}
-	return summary;
-}
-
-function summarizeContent(content: unknown): JsonRecord {
-	if (!Array.isArray(content)) {
-		return { kind: typeof content };
-	}
-
-	let textItems = 0;
-	let imageItems = 0;
-	let totalTextLength = 0;
-	let otherItems = 0;
-
-	for (const item of content) {
-		if (!item || typeof item !== "object") {
-			otherItems++;
-			continue;
-		}
-		const record = item as JsonRecord;
-		if (record.type === "text") {
-			textItems++;
-			if (typeof record.text === "string") totalTextLength += record.text.length;
-		} else if (record.type === "image") {
-			imageItems++;
-		} else {
-			otherItems++;
-		}
-	}
-
-	return {
-		items: content.length,
-		textItems,
-		imageItems,
-		otherItems,
-		totalTextLength,
-	};
-}
-
-function summarizeMessage(message: unknown): JsonRecord {
-	if (!message || typeof message !== "object") {
-		return { kind: typeof message };
-	}
-
-	const record = message as JsonRecord;
-	const summary: JsonRecord = {
-		role: record.role,
-		type: record.type,
-		keys: Object.keys(record).slice(0, 20),
-	};
-
-	if (typeof record.content === "string") {
-		summary.content = { type: "string", length: record.content.length };
-	} else if (Array.isArray(record.content)) {
-		summary.content = summarizeContent(record.content);
-	}
-
-	if (Array.isArray(record.toolCalls)) {
-		summary.toolCalls = record.toolCalls.length;
-	}
-
-	return summary;
-}
-
-function summarizeProviderPayload(payload: unknown): JsonRecord {
-	if (!payload || typeof payload !== "object") {
-		return { kind: typeof payload };
-	}
-
-	const record = payload as JsonRecord;
-	const summary: JsonRecord = {
-		keys: Object.keys(record).slice(0, 30),
-	};
-
-	if (Array.isArray(record.messages)) {
-		const roleCounts: Record<string, number> = {};
-		for (const message of record.messages) {
-			const role =
-				message && typeof message === "object" && "role" in message
-					? String((message as { role?: unknown }).role ?? "unknown")
-					: "unknown";
-			roleCounts[role] = (roleCounts[role] ?? 0) + 1;
-		}
-		summary.messages = {
-			count: record.messages.length,
-			roleCounts,
-		};
-	}
-
-	for (const toolKey of ["tools", "functions"] as const) {
-		if (Array.isArray(record[toolKey])) {
-			summary[toolKey] = { count: record[toolKey].length };
-		}
-	}
-
-	if (typeof record.model === "string") summary.model = record.model;
-	if (typeof record.max_tokens === "number") summary.maxTokens = record.max_tokens;
-	if (typeof record.max_output_tokens === "number") summary.maxOutputTokens = record.max_output_tokens;
-	if (typeof record.temperature === "number") summary.temperature = record.temperature;
-
-	return summary;
-}
-
-function getModelSummary(ctx: ExtensionContext): TraceEvent["model"] | undefined {
-	const model = ctx.model;
-	if (!model) return undefined;
-	const record = model as unknown as JsonRecord;
-	return {
-		provider: typeof record.provider === "string" ? record.provider : undefined,
-		id: typeof record.id === "string" ? record.id : undefined,
-		name: typeof record.name === "string" ? record.name : undefined,
-	};
-}
-
-function getSessionLeafId(ctx: ExtensionContext): string | undefined {
-	return ctx.sessionManager.getLeafEntry()?.id;
-}
-
-function createRecorder(pi: ExtensionAPI): {
-	state: TraceState;
-	record(type: string, ctx: ExtensionContext, data?: JsonRecord): void;
-	reset(cwd: string): void;
-} {
-	const state: TraceState = {
-		traceId: newTraceId(),
-		sequence: 0,
-		startedAt: isoNow(),
-		lastEventTypes: [],
-		counts: {},
-	};
-
-	function reset(cwd: string): void {
-		state.traceId = newTraceId();
-		state.sequence = 0;
-		state.startedAt = isoNow();
-		state.lastEventTypes = [];
-		state.counts = {};
-		state.traceFile = getTraceFile(cwd, state.traceId);
-		ensureDir(getTraceDir(cwd));
-	}
-
-	function record(type: string, ctx: ExtensionContext, data?: JsonRecord): void {
-		if (!state.traceFile) {
-			state.traceFile = getTraceFile(ctx.cwd, state.traceId);
-			ensureDir(getTraceDir(ctx.cwd));
-		}
-
-		state.sequence += 1;
-		state.counts[type] = (state.counts[type] ?? 0) + 1;
-		state.lastEventTypes.push(type);
-		state.lastEventTypes = state.lastEventTypes.slice(-10);
-
-		const event: TraceEvent = {
-			schemaVersion: SCHEMA_VERSION,
-			traceId: state.traceId,
-			eventId: `${state.traceId}:${state.sequence}`,
-			type,
-			timestamp: isoNow(),
-			sessionLeafId: getSessionLeafId(ctx),
-			model: getModelSummary(ctx),
-			contextUsage: ctx.getContextUsage(),
-			data: data ? (safeJson(data) as JsonRecord) : undefined,
-		};
-
-		pi.appendEntry(CUSTOM_TYPE, event);
-		appendFileSync(state.traceFile, `${JSON.stringify(event)}\n`, "utf8");
-	}
-
-	return { state, record, reset };
-}
-
-function formatCounts(counts: Record<string, number>): string[] {
-	const entries = Object.entries(counts).sort(([a], [b]) => a.localeCompare(b));
-	if (entries.length === 0) return ["No events recorded yet."];
-	return entries.map(([type, count]) => `${type}: ${count}`);
-}
-
 export default function evopiTraceExtension(pi: ExtensionAPI) {
 	const recorder = createRecorder(pi);
-	const costState: CostState = {
-		providerRequests: 0,
-		providerResponses: 0,
-	};
+	const shared: { recorder: Recorder } = { recorder };
+
+	// 模块 2：Cost —— 自注册 provider 钩子 + /evopi-cost。
+	registerCost(pi, shared);
+
 	const toolStats = new Map<string, ToolStat>();
 	let currentJob: JobState | undefined;
 
@@ -408,26 +162,6 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("evopi-cost", {
-		description: "Show EvoPi context and provider cost signals",
-		handler: async (_args, ctx) => {
-			const usage = ctx.getContextUsage();
-			const lines = [
-				`model: ${ctx.model?.provider ?? "unknown"}/${ctx.model?.id ?? "unknown"}`,
-				`context: ${
-					usage
-						? `${usage.tokens ?? "unknown"} / ${usage.contextWindow} (${usage.percent ?? "unknown"}%)`
-						: "unknown"
-				}`,
-				`providerRequests: ${costState.providerRequests}`,
-				`providerResponses: ${costState.providerResponses}`,
-				`lastProviderStatus: ${costState.lastProviderStatus ?? "none"}`,
-				`lastPayload: ${JSON.stringify(costState.lastPayload ?? {})}`,
-			];
-			ctx.ui.notify(lines.join("\n"), "info");
-		},
-	});
-
 	pi.registerCommand("evopi-memory", {
 		description: "Manage EvoPi project memory",
 		handler: async (args, ctx) => {
@@ -441,13 +175,8 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 					return;
 				}
 				const path = appendMemory(ctx.cwd, text, recorder.state.traceId);
-				recorder.record("memory.write", ctx, { path, textLength: text.length });
-				pi.appendEntry("evopi.memory", {
-					traceId: recorder.state.traceId,
-					path,
-					text,
-					timestamp: isoNow(),
-				});
+				// 显式 memory.write 是「资产产生」→ 写 session anchor（Anchor-only 判据）。
+				recorder.record("memory.write", ctx, { path, textLength: text.length }, { anchor: true });
 				ctx.ui.notify(`Memory appended to ${path}`, "info");
 				return;
 			}
@@ -487,7 +216,8 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 					traceId: recorder.state.traceId,
 				};
 				persistJob();
-				recorder.record("job.start", ctx, currentJob as unknown as JsonRecord);
+				// job 起始是治理锚点 → 写 session anchor。
+				recorder.record("job.start", ctx, currentJob as unknown as JsonRecord, { anchor: true });
 				ctx.ui.notify(`Started ${currentJob.id}: ${currentJob.title}`, "info");
 				return;
 			}
@@ -523,7 +253,8 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 
 			if (["queued", "running", "waitingApproval", "failed", "passed", "blocked"].includes(trimmed)) {
 				updateJobStatus(trimmed as JobState["status"]);
-				recorder.record("job.status", ctx, { jobId: currentJob?.id, status: trimmed });
+				// job 终态是治理锚点 → 写 session anchor。
+				recorder.record("job.status", ctx, { jobId: currentJob?.id, status: trimmed }, { anchor: true });
 				ctx.ui.notify(currentJob ? `${currentJob.id} -> ${trimmed}` : "No active job.", currentJob ? "info" : "warning");
 				return;
 			}
@@ -584,7 +315,6 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 					timestamp: isoNow(),
 				};
 				const path = appendEvalRecord(ctx.cwd, record);
-				pi.appendEntry("evopi.eval", record);
 				recorder.record("eval.score", ctx, record as unknown as JsonRecord);
 				ctx.ui.notify(`Eval recorded in ${path}`, "info");
 				return;
@@ -607,11 +337,17 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (event, ctx) => {
 		recorder.reset(ctx.cwd);
 		ensureMemoryFiles(ctx.cwd);
-		recorder.record("session.start", ctx, {
-			reason: event.reason,
-			previousSessionFile: event.previousSessionFile,
-			trusted: ctx.isProjectTrusted(),
-		});
+		// 会话起始是关键语义锚点 → 写 session anchor。
+		recorder.record(
+			"session.start",
+			ctx,
+			{
+				reason: event.reason,
+				previousSessionFile: event.previousSessionFile,
+				trusted: ctx.isProjectTrusted(),
+			},
+			{ anchor: true },
+		);
 	});
 
 	pi.on("agent_start", (_event, ctx) => {
@@ -638,28 +374,6 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 			turnIndex: event.turnIndex,
 			finalMessage: summarizeMessage(event.message),
 			toolResults: event.toolResults.length,
-		});
-	});
-
-	pi.on("before_provider_request", (event, ctx) => {
-		costState.providerRequests += 1;
-		costState.lastPayload = summarizeProviderPayload(event.payload);
-		costState.lastContextUsage = ctx.getContextUsage();
-		recorder.record("provider.request", ctx, {
-			payload: costState.lastPayload,
-		});
-	});
-
-	pi.on("after_provider_response", (event, ctx) => {
-		costState.providerResponses += 1;
-		costState.lastProviderStatus = event.status;
-		recorder.record("provider.response", ctx, {
-			status: event.status,
-			headers: {
-				"x-request-id": event.headers["x-request-id"],
-				"request-id": event.headers["request-id"],
-				"content-type": event.headers["content-type"],
-			},
 		});
 	});
 
@@ -710,27 +424,42 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_before_compact", (event, ctx) => {
-		recorder.record("compact.before", ctx, {
-			reason: event.reason,
-			willRetry: event.willRetry,
-			branchEntries: event.branchEntries.length,
-		});
+		// compaction 前后是关键语义锚点 → 写 session anchor。
+		recorder.record(
+			"compact.before",
+			ctx,
+			{
+				reason: event.reason,
+				willRetry: event.willRetry,
+				branchEntries: event.branchEntries.length,
+			},
+			{ anchor: true },
+		);
 	});
 
 	pi.on("session_compact", (event, ctx) => {
-		recorder.record("compact.after", ctx, {
-			reason: event.reason,
-			willRetry: event.willRetry,
-			compactionEntryId: event.compactionEntry.id,
-			fromExtension: event.fromExtension,
-		});
+		recorder.record(
+			"compact.after",
+			ctx,
+			{
+				reason: event.reason,
+				willRetry: event.willRetry,
+				compactionEntryId: event.compactionEntry.id,
+				fromExtension: event.fromExtension,
+			},
+			{ anchor: true },
+		);
 	});
 
 	pi.on("session_shutdown", (event, ctx) => {
-		recorder.record("session.shutdown", ctx, {
-			reason: event.reason,
-			targetSessionFile: event.targetSessionFile,
-		});
+		recorder.record(
+			"session.shutdown",
+			ctx,
+			{
+				reason: event.reason,
+				targetSessionFile: event.targetSessionFile,
+			},
+			{ anchor: true },
+		);
 	});
 }
-
