@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/hooks/evopi-inject-progress.mjs"],
+            "timeout": 15,
+            "statusMessage": "注入 EvoPi 实现进度…"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/hooks/evopi-snapshot.mjs"],
+            "timeout": 15,
+            "statusMessage": "落 EvoPi 压缩前快照…"
+          }
+        ]
+      }
+    ]
+  }
+}
