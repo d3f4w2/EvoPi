@@ -1,83 +1,92 @@
-# EvoPi Module Index
+# EvoPi
 
-EvoPi uses Pi as the base coding agent and adds governance harnesses around the model/tool loop. The open-source projects in `../Pi开源参考项目调研_2026-06-30.md` are treated as design references, not code to vendor.
+> 给开源编码 agent（Pi）套上一层**治理与自我进化**能力的项目——让 agent 的每一步都可观测、可控、可评测、可沉淀。
+
+EvoPi 以开源的 **Pi 编码 agent** 为底座，在它的「模型 ↔ 工具」循环外围加一圈治理机制（harness）。不改 Pi core，全部通过 Pi 的扩展钩子实现。`../Pi开源参考项目调研_2026-06-30.md` 里的开源项目只作设计参考，不 vendor 代码。
+
+## EvoPi 解决什么问题
+
+裸的编码 agent 是个「黑盒」：你不知道它每一步做了什么、花了多少钱、为什么失败；它可能跑危险命令、可能失忆、改坏了也回不去；它学到的经验留不下来。EvoPi 给它补上六层能力：
+
+| 痛点 | EvoPi 的答案 |
+| --- | --- |
+| 跑完不知道发生了啥 | **Trace 观测**：每次运行有 traceId，全过程写 JSONL |
+| 不知道花了多少、缓存有没有用 | **上下文成本**：命中率、token/成本、上下文压力告警 |
+| 会失忆、经验留不下 | **技能记忆**：项目记忆 + 技能治理 + （V2）自进化 |
+| 可能跑危险操作 | **执行治理**：Policy Gate 拦高危 + 审批 + checkpoint |
+| 工具跑挂了/失控不知道 | **工具运行时**：错误分类 + 预算 + 延迟统计 |
+| 改动是好是坏没法验证 | **评测协作**：确定性评分 + 子代理 + 回归门禁 |
+
+## 核心模型
+
+EvoPi 建立在五个概念上：
+
+- **Session** = 用户与 agent 的主线语义记录（只记重要语义事件）
+- **Session Tree** = Session 的 resume / fork / branch 结构
+- **Trace** = agent 执行过程的完整观测证据链（记所有执行细节）
+- **Eval** = 对 Trace 的评分
+- **Memory / Skill** = 从高分/低分 Trace + Eval 沉淀的长期资产
+
+一句话：**Trace 是底座，Cost / Memory / Execution / Tool / Eval 都是它的消费者。**
+
+## 六个模块一览
+
+| # | 模块 | 一句话 | 状态 |
+| --- | --- | --- | --- |
+| 1 | [Trace 观测机制](01-Trace观测机制.md) | 底座：把执行过程记成可重放的结构化事件 | ✅ 方案 + MVP |
+| 2 | [上下文成本机制](02-上下文成本机制.md) | 缓存命中率观测 + 预算告警（不和 Pi 自动缓存抢断点） | ✅ 方案 |
+| 3 | [技能记忆机制](03-技能记忆机制.md) | 项目记忆 + 技能路由/信任；自进化推 V2 | ✅ 方案 |
+| 4 | [执行治理机制](04-执行治理机制.md) | 拦高危 + 审批 + checkpoint/rewind | ✅ 方案 |
+| 5 | [工具运行时机制](05-工具运行时机制.md) | 工具失败分类 + 预算 + 延迟统计 | ✅ 方案 |
+| 6 | [评测协作机制](06-评测协作机制.md) | 确定性评分 + spawn 子代理 + 棘轮门禁 | ✅ 方案 |
+| 7 | [文档产品化机制](07-文档产品化机制.md) | 把 EvoPi 讲清楚、能演示、可度量 | 🔄 本模块 |
+
+## EvoPi 与 Pi 的关系
+
+EvoPi 的设计原则是**「能复用 Pi 就不造轮子，只补 Pi 缺的」**。每个模块文档都有一节「Pi 现状 → EvoPi 增量 → 实现前后区别」，说清哪些是 Pi 白送的、哪些是 EvoPi 新增的。举几个例子：
+
+- Pi 已自动做 Anthropic prompt 缓存（占了 4 个断点里的 3 个）→ EvoPi **不**手动加断点，只观测命中率 + 调 retention。
+- Pi 的 `tool_call` 钩子能真 block、`ctx.ui` 能弹确认 → EvoPi 的 Policy Gate 直接建在上面。
+- Pi 有完整的 subagent 能力（进程隔离、工具/模型隔离、agent card 格式）→ EvoPi 的评测子代理复用它。
+- Pi 完全没有：记忆、错误分类、预算、评分、棘轮 → 这些是 EvoPi 全新增的。
+
+## 演进节奏
+
+贯穿六个模块的一条线：**V1 做观测/基础，V2 做自动化**。Cost 先观测缓存、技能先做候选、验收先摆证据、rewind 先手动、棘轮先半自动——把「看得见、可控」先做扎实，把「自动决策」留给证据充分之后。每个模块文档都有 V1/V2/V3 演化路线。
+
+## 快速开始（Trace MVP）
+
+目前已实现的是项目本地的 `evopi-trace` 扩展（`.pi/extensions/evopi-trace/index.ts`），它记录轻量 trace 事件，并为每个模块暴露命令。
+
+1. 从 `D:\evopi` 启动 Pi，让它发现项目本地扩展 `.pi/extensions/evopi-trace/index.ts`。
+2. 跑任意会调用模型或工具的 prompt。
+3. 用下面的命令查看状态。
+
+Trace 事件写两处：`pi.appendEntry("evopi.trace", ...)` 进 session + `.pi/evopi/traces/<traceId>.jsonl`。默认只记摘要（计数/角色类型/工具名/状态/上下文用量），不存完整 prompt/payload/tool 结果。
+
+### 命令一览
+
+| 命令 | 作用 |
+| --- | --- |
+| `/evopi-trace` / `last` / `path` | trace id、事件计数、JSONL 路径 |
+| `/evopi-cost` | 模型/上下文用量、provider 请求计数 |
+| `/evopi-memory` / `add <fact>` | 记忆文件计数 / 追加项目记忆 |
+| `/evopi-job` / `start <title>` / `plan` / `acceptance` / 状态切换 | 受治理 job 状态 |
+| `/evopi-tools` | 工具调用/错误计数 |
+| `/evopi-eval` / `record <name> <score>` | eval 记录 |
+
+## 文档地图
+
+- **[00 整体架构](00-整体架构.md)** —— 站在高处看：分层/时序/事件总线/存储/依赖（先看这个建立全局图）
+- **[讨论进度表](进度.md)** —— 单一进度事实源，每次对齐先看它
+- **[模块待办清单](模块待办清单.md)** —— 各模块 backlog
+- 七个模块方案：[01](01-Trace观测机制.md) · [02](02-上下文成本机制.md) · [03](03-技能记忆机制.md) · [04](04-执行治理机制.md) · [05](05-工具运行时机制.md) · [06](06-评测协作机制.md) · [07](07-文档产品化机制.md)
 
 ## 文档规则（项目级约定）
 
-1. **每个决策都要写明「为什么这么选」的理由**。不只写「做什么」，还要写「为什么这样而不是那样」——含权衡、被否方案、依据的事实。每个模块的「最终方案」文档必须包含：**决策 / 实现 / 架构优点 / 少量缺点**，其中「决策」一栏要带理由。
-2. **每个模块文档要给出演化路线**：不仅写当前选定的 V1 范围，还要写后续演化版本（V2 / V3 …）打算加什么、为什么推后。让读者看到「现在做什么 + 将来长成什么样」。
-3. **每个模块文档要讲清「Pi 现状 → EvoPi 增量 → 实现前后区别」**（来自 `../实现文档（暂时不写）/小记`）：① Pi 已实现什么、源码层面怎么做的；② 本模块架构；③ EvoPi 还要实现什么、如何实现；④ 实现前后行为/能力有什么区别。目的：看清哪些是 Pi 白送的、哪些是 EvoPi 新增的，避免重复造轮子。
-4. 逐模块讨论，讨论清楚再落文档；进度见 [进度.md](进度.md)（单一进度事实源）。
+1. **每个决策都要写明「为什么这么选」的理由**——含权衡、被否方案、依据的事实。每个模块「最终方案」文档必须含：**决策 / 实现 / 架构优点 / 少量缺点**。
+2. **每个模块文档要给出演化路线**（V1 / V2 / V3）：现在做什么 + 将来长成什么样。
+3. **每个模块文档要讲清「Pi 现状 → EvoPi 增量 → 实现前后区别」**：看清哪些是 Pi 白送的、哪些是 EvoPi 新增的，避免重复造轮子。
+4. 逐模块讨论，讨论清楚再落文档；进度见 [进度.md](进度.md)。
 5. 文档用中文书写（代码标识符、API 名、路径可保留英文）。
-6. 工作目录是 `D:\evopi`（内层 `pi/` 是只读参考仓库）；模块文档在 `docs/evopi-v1/`。
-
-## Module Stack
-
-| Layer | Module | Purpose | First artifact |
-|---|---|---|---|
-| Foundation | Trace Observability Harness | Persist agent runs, provider calls, tools, costs, approvals, eval scores, and memory events in a replayable format. | `.pi/extensions/evopi-trace/index.ts` |
-| Core | Context Cost Harness | Control context budget, prompt cache layout, retrieval injection, and model/cost reporting. | Design document |
-| Core | Skill Memory Harness | Route skills and project memory with trust, usage stats, and controlled self-evolution. | Design document |
-| Core | Execution Harness | Turn user requests into governed jobs with plan/act/review, checkpoints, approvals, and acceptance. | Design document |
-| Core | Tool Runtime Harness | Govern MCP/tools with budget, structured errors, sandbox policies, and browser verification. | Design document |
-| Core | Eval Collaboration Harness | Run subagents, regression datasets, score gates, and worktree-isolated reviews. | Design document |
-| Product | Docs & Productization Harness | Keep architecture docs, demos, acceptance metrics, and resume narrative in sync. | This docs tree |
-
-## Implementation Order
-
-1. Build Trace Observability first because every other module needs a durable event stream.
-2. Add Context Cost next because it gives fast measurable output: cache hit rate, token budget, and request cost.
-3. Add Skill Memory after trace/cost so skill routing can be measured and memory writes can be audited.
-4. Add Execution and Tool Runtime once the policy and trace vocabulary is stable.
-5. Add Eval Collaboration last so eval gates can reuse trace, skill stats, and execution job records.
-
-## Current MVP
-
-The first implemented artifact is the project-local `evopi-trace` extension. It records lightweight trace events and exposes initial command skeletons for every Harness module.
-
-Trace events are written to:
-
-- Pi session custom entries via `pi.appendEntry("evopi.trace", ...)`
-- JSONL files under `.pi/evopi/traces/`
-
-The extension intentionally avoids storing full provider payloads, full prompts, or full tool results by default. It records counts, role/type summaries, tool names, status, and context usage.
-
-Additional module state is written as:
-
-- `evopi.job` session entries for governed job state.
-- `evopi.memory` session entries plus `.pi/evopi/memory/*.md`.
-- `evopi.eval` session entries plus `.pi/evopi/evals/runs.jsonl`.
-
-## Document Set
-
-- [01 Trace 观测机制](01-Trace观测机制.md)
-- [02 上下文成本机制](02-上下文成本机制.md)
-- [03 技能记忆机制](03-技能记忆机制.md)
-- [04 执行治理机制](04-执行治理机制.md)
-- [05 工具运行时机制](05-工具运行时机制.md)
-- [06 评测协作机制](06-评测协作机制.md)
-- [07 文档产品化机制](07-文档产品化机制.md)
-- [模块待办清单](模块待办清单.md)
-- [讨论进度表](进度.md)
-
-## Using The Trace MVP
-
-Run Pi from `D:\evopi` so the project-local extension is discovered from `.pi/extensions/evopi-trace/index.ts`.
-
-Available commands:
-
-- `/evopi-trace` shows the current trace id, JSONL path, and event counters.
-- `/evopi-trace last` shows the last recorded event types.
-- `/evopi-trace path` shows the trace JSONL file path.
-- `/evopi-cost` shows model/context usage and provider request counters.
-- `/evopi-memory` shows memory file counts.
-- `/evopi-memory add <fact>` appends a project memory entry.
-- `/evopi-job` shows the current governed job.
-- `/evopi-job start <title>` starts a job bound to the current trace.
-- `/evopi-job plan <text>` records a plan for the current job.
-- `/evopi-job acceptance <text>` records acceptance criteria.
-- `/evopi-job passed|failed|blocked|running|queued|waitingApproval` updates status.
-- `/evopi-tools` shows tool call/error counts.
-- `/evopi-eval` shows eval record count.
-- `/evopi-eval record <name> <score> [notes]` appends an eval score.
-
+6. 工作目录 `D:\evopi`（内层 `pi/` 是只读参考仓库）；模块文档在 `docs/evopi-v1/`。

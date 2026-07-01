@@ -31,23 +31,23 @@
 | 后续模块要观测数据 | 各自造 | 复用统一事件词表 + JSONL 底座 |
 | 敏感数据 | 钩子里有原始 payload | 默认只落摘要，脱敏 |
 
-## Summary
+## 概述
 
-Trace Observability is the foundation for EvoPi. It captures the agent execution timeline as structured events that can later feed cost dashboards, policy audits, memory distillation, eval gates, and regression replay.
+Trace 观测是 EvoPi 的底座。它把 agent 的执行时间线捕获成结构化事件，供后续的成本看板、策略审计、记忆蒸馏、eval 门禁、回归重放消费。
 
-The MVP is a project-local Pi extension at `.pi/extensions/evopi-trace/index.ts`. It does not modify Pi core. It subscribes to Pi lifecycle hooks and writes append-only trace events.
+MVP 是一个项目本地的 Pi 扩展 `.pi/extensions/evopi-trace/index.ts`。它不修改 Pi core，只订阅 Pi 生命周期钩子并写 append-only 的 trace 事件。
 
-## Goals
+## 目标
 
-- Give every agent run a `traceId`.
-- Record turn, provider, tool, message, compaction, and context-usage events.
-- Persist events both in the Pi session tree and in JSONL files for offline analysis.
-- Avoid leaking sensitive prompt or tool payloads by default.
-- Establish event names and payload shapes that later modules can reuse.
+- 给每次 agent 运行一个 `traceId`。
+- 记录 turn、provider、tool、message、compaction、上下文用量事件。
+- 事件双写：Pi session tree + JSONL 文件（供离线分析）。
+- 默认不泄露敏感的 prompt 或 tool payload。
+- 确立事件名与 payload 形状，供后续模块复用。
 
-## Event Model
+## 事件模型
 
-Trace events use this shape:
+Trace 事件用这个结构：
 
 ```ts
 interface EvoPiTraceEvent {
@@ -71,9 +71,9 @@ interface EvoPiTraceEvent {
 }
 ```
 
-Initial event types:
+初始事件类型：
 
-| Event | Hook | Data |
+| 事件 | 钩子 | 数据 |
 |---|---|---|
 | `session.start` | `session_start` | reason, restored trace state |
 | `agent.start` | `agent_start` | active tools count |
@@ -89,24 +89,24 @@ Initial event types:
 | `compact.after` | `session_compact` | reason, compaction entry id |
 | `session.shutdown` | `session_shutdown` | reason |
 
-## Storage
+## 存储
 
-The MVP writes to two stores:
+MVP 写两个存储：
 
-- Session custom entries: useful for branch-aware state reconstruction and future UI commands.
-- `.pi/evopi/traces/<traceId>.jsonl`: useful for grep, offline scoring, import into Langfuse/Phoenix-style tools, and future OTLP export.
+- Session 自定义条目：用于分支感知的状态重建和未来的 UI 命令。
+- `.pi/evopi/traces/<traceId>.jsonl`：用于 grep、离线评分、导入 Langfuse/Phoenix 类工具、未来 OTLP 导出。
 
-No SQLite database is required in the first implementation. A SQLite layer can be added after event vocabulary stabilizes.
+第一版不需要 SQLite。SQLite 层可在事件词表稳定后再加。
 
-## Public Interface
+## 对外接口
 
-The MVP registers:
+MVP 注册：
 
-- `/evopi-trace`: show the current trace id and in-memory event counters.
-- `/evopi-trace last`: show the last 10 recorded event types.
-- `/evopi-trace path`: show the current JSONL trace file path.
+- `/evopi-trace`：显示当前 trace id 和 in-memory 事件计数。
+- `/evopi-trace last`：显示最近 10 个事件类型。
+- `/evopi-trace path`：显示当前 JSONL trace 文件路径。
 
-The same extension also registers lightweight skeleton commands for the other Harness modules:
+同一扩展还为其它 Harness 模块注册了轻量命令（现已实现，非骨架）：
 
 - `/evopi-cost`
 - `/evopi-memory`
@@ -114,29 +114,29 @@ The same extension also registers lightweight skeleton commands for the other Ha
 - `/evopi-tools`
 - `/evopi-eval`
 
-Future commands:
+未来命令：
 
 - `/evopi-trace export --openinference`
 - `/evopi-trace score`
 - `/evopi-trace replay`
 
-## Privacy Defaults
+## 隐私默认
 
-The extension records summaries instead of raw bodies:
+扩展记录摘要而非原始 body：
 
-- Provider payloads: role counts, message count, tool count, top-level keys.
-- Tool inputs: key names and safe scalar length summaries.
-- Tool results: content item counts, text length totals, image counts, error flag.
-- Messages: role/type, text length, part count.
+- Provider payload：角色数、消息数、工具数、顶层 key。
+- Tool 输入：key 名和安全的标量长度摘要。
+- Tool 结果：内容项数、文本总长、图片数、错误标志。
+- 消息：角色/类型、文本长度、片段数。
 
-Full payload capture should only be added behind an explicit opt-in config.
+完整 payload 捕获只应在显式 opt-in 配置后开启。
 
-## Acceptance Checks
+## 验收检查
 
-- Starting a Pi session loads the extension without throwing.
-- Running a model turn creates a JSONL file under `.pi/evopi/traces/`.
-- Tool calls append `tool.call` and `tool.result` events.
-- Provider calls append `provider.request` and `provider.response` without raw prompt text.
-- `/evopi-trace`, `/evopi-trace last`, and `/evopi-trace path` return useful status.
-- Cost, memory, job, tools, and eval commands register and write their initial state formats.
+- 启动 Pi session 时扩展加载不抛错。
+- 跑一个模型 turn 会在 `.pi/evopi/traces/` 下生成 JSONL 文件。
+- 工具调用追加 `tool.call` 和 `tool.result` 事件。
+- Provider 调用追加 `provider.request` 和 `provider.response`，不含原始 prompt 文本。
+- `/evopi-trace`、`/evopi-trace last`、`/evopi-trace path` 返回有用状态。
+- cost、memory、job、tools、eval 命令注册并写入各自的初始状态格式。
 
