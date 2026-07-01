@@ -1,0 +1,31 @@
+{
+  "_comment": "Merge this hooks block into your project .claude/settings.json. Adjust the .mjs paths to where you copied the templates. SessionStart injects the progress table; PreCompact writes a black-box snapshot.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/hooks/inject-progress.mjs"],
+            "timeout": 15,
+            "statusMessage": "Injecting impl progress..."
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/hooks/snapshot.mjs"],
+            "timeout": 15,
+            "statusMessage": "Writing pre-compact snapshot..."
+          }
+        ]
+      }
+    ]
+  }
+}
