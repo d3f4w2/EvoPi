@@ -9,7 +9,9 @@
 //     共享策略 → policy.ts。旧 /evopi-memory MVP 已被 memory.ts 取代并删除。
 //   - 模块 4（执行治理）：/evopi-job + Policy Gate + checkpoint/rewind + 证据验收 → job.ts（registerJob）。
 //     Policy Gate 的决策函数由本文件的**单一 tool_call handler** 调用（安全>资源，模块 4 先于 5）；旧 /evopi-job MVP 已删除。
-//   - 其余模块（tools/eval）MVP 暂留本文件，按各自模块开工时再迁出（模块 5/6）。
+//   - 模块 5（工具运行时）：错误分类 + 延迟 + 预算 + /evopi-tools → tools.ts（createTools）。
+//     预算决策接在单一 tool_call handler 里 policy **之后**（安全>资源）；tool.result 观测迁入 tools.ts。
+//   - 其余模块（eval）MVP 暂留本文件，按各自模块开工时再迁出（模块 6）。
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,6 +20,7 @@ import { registerCost } from "./cost";
 import { registerJob } from "./job";
 import { registerMemory } from "./memory";
 import { registerSkill } from "./skill";
+import { createTools } from "./tools";
 import {
 	type JsonRecord,
 	type Recorder,
@@ -27,19 +30,11 @@ import {
 	getEvoPiDir,
 	getTraceFile,
 	isoNow,
-	summarizeContent,
 	summarizeMessage,
 	summarizeRecord,
-	summarizeScalar,
 } from "./trace";
 
-// --- 以下模块（tools/eval）仍是 MVP，等对应模块开工再迁出到各自 .ts ---
-
-interface ToolStat {
-	calls: number;
-	errors: number;
-	lastUsedAt?: string;
-}
+// --- 以下模块（eval）仍是 MVP，等对应模块开工再迁出到各自 .ts ---
 
 interface EvalRecord {
 	id: string;
@@ -84,7 +79,8 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 	// 模块 4：执行治理 —— /evopi-job + Policy Gate。返回决策函数交给下面的单一 tool_call handler（安全>资源）。
 	const job = registerJob(pi, shared);
 
-	const toolStats = new Map<string, ToolStat>();
+	// 模块 5：工具运行时 —— 错误分类 + 延迟 + 预算。预算决策接在 policy 之后（安全>资源）；tool.result 观测在 tools.ts。
+	const tools = createTools(shared);
 
 	pi.registerCommand("evopi-trace", {
 		description: "Show EvoPi trace status",
@@ -116,16 +112,9 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 	// /evopi-memory 由 registerMemory（memory.ts）注册；/evopi-job 由 registerJob（job.ts）注册。旧 MVP 已删除。
 
 	pi.registerCommand("evopi-tools", {
-		description: "Show EvoPi tool runtime stats",
+		description: "Show EvoPi tool runtime stats (错误分类 / 延迟 / 预算)",
 		handler: async (_args, ctx) => {
-			if (toolStats.size === 0) {
-				ctx.ui.notify("No tool calls recorded yet.", "info");
-				return;
-			}
-			const lines = Array.from(toolStats.entries())
-				.sort(([a], [b]) => a.localeCompare(b))
-				.map(([name, stat]) => `${name}: calls=${stat.calls} errors=${stat.errors} lastUsed=${stat.lastUsedAt ?? "never"}`);
-			ctx.ui.notify(lines.join("\n"), "info");
+			ctx.ui.notify(tools.renderStats(), "info");
 		},
 	});
 
@@ -200,6 +189,8 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("turn_start", (event, ctx) => {
+		// 模块 5：per-turn 预算重置（防单轮死循环，决策 4）。
+		tools.resetTurn();
 		recorder.record("turn.start", ctx, {
 			turnIndex: event.turnIndex,
 			timestamp: event.timestamp,
@@ -214,53 +205,53 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 		});
 	});
 
-	// 单一 tool_call handler（安全 > 资源）：先跑模块 4 Policy Gate 决策 → 命中 block 立即返回；
-	// 否则做观测（trace + 工具统计 + 计入 job）。模块 5（预算资源）将来接在 policy 之后同一 handler 内。
+	// 单一 tool_call handler（安全 > 资源，决策 6）：① 模块 4 Policy Gate 安全准入 → 命中 block 立即返回；
+	// ② 模块 5 预算资源硬限 → 命中 block 返回；③ 都放行才做观测（trace + 计入 job/预算计时）。
+	// 安全先于资源：rm -rf 比「次数超限」严重，用户应先知道是危险被拦（原因确定，不靠注册顺序）。
 	pi.on("tool_call", async (event, ctx) => {
 		// ① 安全准入（模块 4）。
-		const decision = await job.evaluateToolCall(
+		const security = await job.evaluateToolCall(
 			{ toolName: event.toolName, toolCallId: event.toolCallId, input: (event.input ?? {}) as JsonRecord },
 			ctx,
 		);
+		// ② 资源预算（模块 5），仅在安全放行后才判。
+		const budget = security.block ? { block: false } : tools.evaluateBudget(event, ctx);
+		const blocked = security.block || budget.block;
+		const reason = security.block ? security.reason : budget.reason;
 
-		// ② 观测：无论放行与否都记 tool.call（这是一次「尝试」）。
+		// 观测：无论放行与否都记 tool.call（这是一次「尝试」）。
 		recorder.record("tool.call", ctx, {
 			toolCallId: event.toolCallId,
 			toolName: event.toolName,
 			input: summarizeRecord(event.input),
-			blocked: decision.block || undefined,
+			blocked: blocked || undefined,
 		});
 
-		if (decision.block) {
-			// 被拦截：不计入执行统计/不计入 job（它没真正执行）。
-			return { block: true, reason: decision.reason };
+		if (blocked) {
+			// 被拦截：不计入执行/预算/job（它没真正执行）。
+			return { block: true, reason };
 		}
 
-		// ③ 放行后的执行观测。
-		const stat = toolStats.get(event.toolName) ?? { calls: 0, errors: 0 };
-		stat.calls += 1;
-		stat.lastUsedAt = isoNow();
-		toolStats.set(event.toolName, stat);
+		// 放行后的执行观测：计入 job + 预算计时/计数（软限告警在 onToolCall 内）。
 		job.onToolCall();
+		tools.onToolCall(event, ctx);
 		return undefined;
 	});
 
+	// tool_result：模块 5 统一处理（latency + errorClass + stats + 记 tool.result）。
+	// job 的错误/测试证据采集在 job.ts 自己的 tool_result handler；两者都是观测，Pi 全执行。
 	pi.on("tool_result", (event, ctx) => {
-		// job 的错误/测试证据采集在 job.ts 的 tool_result handler；这里只做工具统计 + trace 观测。
-		const stat = toolStats.get(event.toolName) ?? { calls: 0, errors: 0 };
-		if (event.isError) {
-			stat.errors += 1;
-		}
-		stat.lastUsedAt = isoNow();
-		toolStats.set(event.toolName, stat);
-		recorder.record("tool.result", ctx, {
-			toolCallId: event.toolCallId,
-			toolName: event.toolName,
-			isError: event.isError,
-			inputKeys: Object.keys(event.input ?? {}).slice(0, 30),
-			content: summarizeContent(event.content),
-			details: summarizeScalar(event.details),
-		});
+		tools.onToolResult(
+			{
+				toolName: event.toolName,
+				toolCallId: event.toolCallId,
+				isError: event.isError,
+				input: (event.input ?? {}) as JsonRecord,
+				content: event.content,
+				details: event.details,
+			},
+			ctx,
+		);
 	});
 
 	pi.on("message_end", (event, ctx) => {
