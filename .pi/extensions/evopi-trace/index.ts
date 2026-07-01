@@ -7,12 +7,15 @@
 //   - 模块 2（Cost）：/evopi-cost + before/after_provider_request 钩子 → cost.ts（registerCost）。
 //   - 模块 3（技能记忆）：/evopi-memory + /evopi-skill、context/resources_discover 钩子 → memory.ts/skill.ts；
 //     共享策略 → policy.ts。旧 /evopi-memory MVP 已被 memory.ts 取代并删除。
-//   - 其余模块（job/tools/eval）MVP 暂留本文件，按各自模块开工时再迁出（模块 4/5/6）。
+//   - 模块 4（执行治理）：/evopi-job + Policy Gate + checkpoint/rewind + 证据验收 → job.ts（registerJob）。
+//     Policy Gate 的决策函数由本文件的**单一 tool_call handler** 调用（安全>资源，模块 4 先于 5）；旧 /evopi-job MVP 已删除。
+//   - 其余模块（tools/eval）MVP 暂留本文件，按各自模块开工时再迁出（模块 5/6）。
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerCost } from "./cost";
+import { registerJob } from "./job";
 import { registerMemory } from "./memory";
 import { registerSkill } from "./skill";
 import {
@@ -30,25 +33,12 @@ import {
 	summarizeScalar,
 } from "./trace";
 
-// --- 以下模块（job/tools/eval）仍是 MVP，等对应模块开工再迁出到各自 .ts ---
+// --- 以下模块（tools/eval）仍是 MVP，等对应模块开工再迁出到各自 .ts ---
 
 interface ToolStat {
 	calls: number;
 	errors: number;
 	lastUsedAt?: string;
-}
-
-interface JobState {
-	id: string;
-	title: string;
-	status: "queued" | "running" | "waitingApproval" | "failed" | "passed" | "blocked";
-	createdAt: string;
-	updatedAt: string;
-	plan?: string;
-	acceptance?: string;
-	toolCalls: number;
-	toolErrors: number;
-	traceId: string;
 }
 
 interface EvalRecord {
@@ -91,21 +81,10 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 	registerMemory(pi, shared);
 	registerSkill(pi, shared);
 
+	// 模块 4：执行治理 —— /evopi-job + Policy Gate。返回决策函数交给下面的单一 tool_call handler（安全>资源）。
+	const job = registerJob(pi, shared);
+
 	const toolStats = new Map<string, ToolStat>();
-	let currentJob: JobState | undefined;
-
-	function persistJob() {
-		if (currentJob) {
-			pi.appendEntry<JobState>("evopi.job", currentJob);
-		}
-	}
-
-	function updateJobStatus(status: JobState["status"]) {
-		if (!currentJob) return;
-		currentJob.status = status;
-		currentJob.updatedAt = isoNow();
-		persistJob();
-	}
 
 	pi.registerCommand("evopi-trace", {
 		description: "Show EvoPi trace status",
@@ -134,90 +113,7 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	// /evopi-memory 由 registerMemory（memory.ts）注册；旧 MVP 已删除。
-
-	pi.registerCommand("evopi-job", {
-		description: "Manage EvoPi governed job state",
-		handler: async (args, ctx) => {
-			const trimmed = args.trim();
-			if (trimmed.startsWith("start ")) {
-				const title = trimmed.slice(6).trim();
-				if (!title) {
-					ctx.ui.notify("Usage: /evopi-job start <title>", "warning");
-					return;
-				}
-				currentJob = {
-					id: `job_${Date.now().toString(36)}`,
-					title,
-					status: "running",
-					createdAt: isoNow(),
-					updatedAt: isoNow(),
-					toolCalls: 0,
-					toolErrors: 0,
-					traceId: recorder.state.traceId,
-				};
-				persistJob();
-				// job 起始是治理锚点 → 写 session anchor。
-				recorder.record("job.start", ctx, currentJob as unknown as JsonRecord, { anchor: true });
-				ctx.ui.notify(`Started ${currentJob.id}: ${currentJob.title}`, "info");
-				return;
-			}
-
-			if (trimmed.startsWith("plan ")) {
-				if (!currentJob) {
-					ctx.ui.notify("No active job. Use /evopi-job start <title> first.", "warning");
-					return;
-				}
-				currentJob.plan = trimmed.slice(5).trim();
-				currentJob.updatedAt = isoNow();
-				persistJob();
-				recorder.record("job.plan", ctx, { jobId: currentJob.id, planLength: currentJob.plan.length });
-				ctx.ui.notify(`Plan saved for ${currentJob.id}`, "info");
-				return;
-			}
-
-			if (trimmed.startsWith("acceptance ")) {
-				if (!currentJob) {
-					ctx.ui.notify("No active job. Use /evopi-job start <title> first.", "warning");
-					return;
-				}
-				currentJob.acceptance = trimmed.slice("acceptance ".length).trim();
-				currentJob.updatedAt = isoNow();
-				persistJob();
-				recorder.record("job.acceptance", ctx, {
-					jobId: currentJob.id,
-					acceptanceLength: currentJob.acceptance.length,
-				});
-				ctx.ui.notify(`Acceptance checklist saved for ${currentJob.id}`, "info");
-				return;
-			}
-
-			if (["queued", "running", "waitingApproval", "failed", "passed", "blocked"].includes(trimmed)) {
-				updateJobStatus(trimmed as JobState["status"]);
-				// job 终态是治理锚点 → 写 session anchor。
-				recorder.record("job.status", ctx, { jobId: currentJob?.id, status: trimmed }, { anchor: true });
-				ctx.ui.notify(currentJob ? `${currentJob.id} -> ${trimmed}` : "No active job.", currentJob ? "info" : "warning");
-				return;
-			}
-
-			if (!currentJob) {
-				ctx.ui.notify("No active job. Use /evopi-job start <title>.", "info");
-				return;
-			}
-
-			const lines = [
-				`id: ${currentJob.id}`,
-				`title: ${currentJob.title}`,
-				`status: ${currentJob.status}`,
-				`traceId: ${currentJob.traceId}`,
-				`toolCalls: ${currentJob.toolCalls}`,
-				`toolErrors: ${currentJob.toolErrors}`,
-				`plan: ${currentJob.plan ?? "unset"}`,
-				`acceptance: ${currentJob.acceptance ?? "unset"}`,
-			];
-			ctx.ui.notify(lines.join("\n"), "info");
-		},
-	});
+	// /evopi-memory 由 registerMemory（memory.ts）注册；/evopi-job 由 registerJob（job.ts）注册。旧 MVP 已删除。
 
 	pi.registerCommand("evopi-tools", {
 		description: "Show EvoPi tool runtime stats",
@@ -318,36 +214,45 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 		});
 	});
 
-	pi.on("tool_call", (event, ctx) => {
-		const stat = toolStats.get(event.toolName) ?? { calls: 0, errors: 0 };
-		stat.calls += 1;
-		stat.lastUsedAt = isoNow();
-		toolStats.set(event.toolName, stat);
-		if (currentJob) {
-			currentJob.toolCalls += 1;
-			currentJob.updatedAt = isoNow();
-			persistJob();
-		}
+	// 单一 tool_call handler（安全 > 资源）：先跑模块 4 Policy Gate 决策 → 命中 block 立即返回；
+	// 否则做观测（trace + 工具统计 + 计入 job）。模块 5（预算资源）将来接在 policy 之后同一 handler 内。
+	pi.on("tool_call", async (event, ctx) => {
+		// ① 安全准入（模块 4）。
+		const decision = await job.evaluateToolCall(
+			{ toolName: event.toolName, toolCallId: event.toolCallId, input: (event.input ?? {}) as JsonRecord },
+			ctx,
+		);
+
+		// ② 观测：无论放行与否都记 tool.call（这是一次「尝试」）。
 		recorder.record("tool.call", ctx, {
 			toolCallId: event.toolCallId,
 			toolName: event.toolName,
 			input: summarizeRecord(event.input),
+			blocked: decision.block || undefined,
 		});
+
+		if (decision.block) {
+			// 被拦截：不计入执行统计/不计入 job（它没真正执行）。
+			return { block: true, reason: decision.reason };
+		}
+
+		// ③ 放行后的执行观测。
+		const stat = toolStats.get(event.toolName) ?? { calls: 0, errors: 0 };
+		stat.calls += 1;
+		stat.lastUsedAt = isoNow();
+		toolStats.set(event.toolName, stat);
+		job.onToolCall();
+		return undefined;
 	});
 
 	pi.on("tool_result", (event, ctx) => {
+		// job 的错误/测试证据采集在 job.ts 的 tool_result handler；这里只做工具统计 + trace 观测。
 		const stat = toolStats.get(event.toolName) ?? { calls: 0, errors: 0 };
 		if (event.isError) {
 			stat.errors += 1;
 		}
 		stat.lastUsedAt = isoNow();
 		toolStats.set(event.toolName, stat);
-		if (currentJob && event.isError) {
-			currentJob.toolErrors += 1;
-			currentJob.status = "failed";
-			currentJob.updatedAt = isoNow();
-			persistJob();
-		}
 		recorder.record("tool.result", ctx, {
 			toolCallId: event.toolCallId,
 			toolName: event.toolName,
