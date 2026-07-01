@@ -1,0 +1,24 @@
+{
+  "name": "evopi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "把 Pi 编码 agent 演化成一圈治理 harness（成本 / 记忆 / 执行准入 / 工具运行时 / 评测）——不改 Pi core，全走生命周期钩子。",
+  "type": "module",
+  "scripts": {
+    "test": "tsx tests/run.ts",
+    "typecheck": "node scripts/typecheck.mjs"
+  },
+  "keywords": [
+    "pi",
+    "coding-agent",
+    "ai-agent",
+    "governance",
+    "guardrails",
+    "observability",
+    "evals"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "tsx": "^4.22.1"
+  }
+}
