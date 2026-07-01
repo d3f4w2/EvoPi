@@ -5,12 +5,16 @@
 // 迁出记录：
 //   - 模块 1（Trace 底座）：recorder/事件写入/摘要工具 → trace.ts。
 //   - 模块 2（Cost）：/evopi-cost + before/after_provider_request 钩子 → cost.ts（registerCost）。
-//   - 其余模块（memory/job/tools/eval）MVP 暂留本文件，按各自模块开工时再迁出（模块 3/4/5/6）。
+//   - 模块 3（技能记忆）：/evopi-memory + /evopi-skill、context/resources_discover 钩子 → memory.ts/skill.ts；
+//     共享策略 → policy.ts。旧 /evopi-memory MVP 已被 memory.ts 取代并删除。
+//   - 其余模块（job/tools/eval）MVP 暂留本文件，按各自模块开工时再迁出（模块 4/5/6）。
 
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerCost } from "./cost";
+import { registerMemory } from "./memory";
+import { registerSkill } from "./skill";
 import {
 	type JsonRecord,
 	type Recorder,
@@ -26,7 +30,7 @@ import {
 	summarizeScalar,
 } from "./trace";
 
-// --- 以下模块（memory/job/tools/eval）仍是 MVP，等对应模块开工再迁出到各自 .ts ---
+// --- 以下模块（job/tools/eval）仍是 MVP，等对应模块开工再迁出到各自 .ts ---
 
 interface ToolStat {
 	calls: number;
@@ -56,10 +60,6 @@ interface EvalRecord {
 	timestamp: string;
 }
 
-function getMemoryDir(cwd: string): string {
-	return join(getEvoPiDir(cwd), "memory");
-}
-
 function getEvalDir(cwd: string): string {
 	return join(getEvoPiDir(cwd), "evals");
 }
@@ -67,38 +67,6 @@ function getEvalDir(cwd: string): string {
 function readText(path: string): string {
 	if (!existsSync(path)) return "";
 	return readFileSync(path, "utf8");
-}
-
-function countMarkdownEntries(path: string): number {
-	return readText(path)
-		.split(/\r?\n/)
-		.filter((line) => line.startsWith("- ")).length;
-}
-
-function ensureMemoryFiles(cwd: string): void {
-	const dir = getMemoryDir(cwd);
-	ensureDir(dir);
-	const files: Array<[string, string]> = [
-		[
-			"INDEX.md",
-			"# EvoPi Memory Index\n\n- MEMORY.md: project facts, preferences, decisions, and commands.\n- SKILLS.md: reusable workflow and skill candidates.\n",
-		],
-		["MEMORY.md", "# EvoPi Project Memory\n\n"],
-		["SKILLS.md", "# EvoPi Skill Candidates\n\n"],
-	];
-	for (const [name, initial] of files) {
-		const path = join(dir, name);
-		if (!existsSync(path)) {
-			writeFileSync(path, initial, "utf8");
-		}
-	}
-}
-
-function appendMemory(cwd: string, text: string, traceId: string): string {
-	ensureMemoryFiles(cwd);
-	const path = join(getMemoryDir(cwd), "MEMORY.md");
-	appendFileSync(path, `- ${isoNow()} [${traceId}] ${text.trim()}\n`, "utf8");
-	return path;
 }
 
 function getEvalRunsFile(cwd: string): string {
@@ -118,6 +86,10 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 
 	// 模块 2：Cost —— 自注册 provider 钩子 + /evopi-cost。
 	registerCost(pi, shared);
+
+	// 模块 3：技能记忆 —— Memory(context 注入/压缩抢救/evopi-memory) + Skill(resources_discover 过滤/统计/evopi-skill)。
+	registerMemory(pi, shared);
+	registerSkill(pi, shared);
 
 	const toolStats = new Map<string, ToolStat>();
 	let currentJob: JobState | undefined;
@@ -162,38 +134,7 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("evopi-memory", {
-		description: "Manage EvoPi project memory",
-		handler: async (args, ctx) => {
-			const trimmed = args.trim();
-			ensureMemoryFiles(ctx.cwd);
-
-			if (trimmed.startsWith("add ")) {
-				const text = trimmed.slice(4).trim();
-				if (!text) {
-					ctx.ui.notify("Usage: /evopi-memory add <fact or decision>", "warning");
-					return;
-				}
-				const path = appendMemory(ctx.cwd, text, recorder.state.traceId);
-				// 显式 memory.write 是「资产产生」→ 写 session anchor（Anchor-only 判据）。
-				recorder.record("memory.write", ctx, { path, textLength: text.length }, { anchor: true });
-				ctx.ui.notify(`Memory appended to ${path}`, "info");
-				return;
-			}
-
-			const dir = getMemoryDir(ctx.cwd);
-			const memoryPath = join(dir, "MEMORY.md");
-			const skillsPath = join(dir, "SKILLS.md");
-			const lines = [
-				`memoryDir: ${dir}`,
-				`memoryEntries: ${countMarkdownEntries(memoryPath)}`,
-				`skillCandidates: ${countMarkdownEntries(skillsPath)}`,
-				"",
-				"Use: /evopi-memory add <fact or decision>",
-			];
-			ctx.ui.notify(lines.join("\n"), "info");
-		},
-	});
+	// /evopi-memory 由 registerMemory（memory.ts）注册；旧 MVP 已删除。
 
 	pi.registerCommand("evopi-job", {
 		description: "Manage EvoPi governed job state",
@@ -336,7 +277,7 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (event, ctx) => {
 		recorder.reset(ctx.cwd);
-		ensureMemoryFiles(ctx.cwd);
+		// 记忆文件由 memory.ts 首次写入时惰性创建，session_start 不再预建。
 		// 会话起始是关键语义锚点 → 写 session anchor。
 		recorder.record(
 			"session.start",
