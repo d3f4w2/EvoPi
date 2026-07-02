@@ -100,7 +100,8 @@ function getRetention(): "none" | "short" | "long" {
 }
 
 /** 缓存命中率口径（决策/处理流程）：cacheRead / (cacheRead + input)。input 为本轮未命中输入 token。 */
-function computeCacheHitRate(usage: ProviderUsage): number {
+// exported 供 tests/ 直接断言命中率口径（纯函数，无副作用）。
+export function computeCacheHitRate(usage: ProviderUsage): number {
 	const denom = usage.cacheRead + usage.input;
 	if (denom <= 0) return 0;
 	return usage.cacheRead / denom;
@@ -368,7 +369,8 @@ function renderDetail(ctx: ExtensionContext, state: CostState, recorder: Recorde
 	].join("\n");
 }
 
-function pressureBand(percent: number): string {
+// exported 供 tests/ 直接断言压力分档阈值（纯函数，无副作用）。
+export function pressureBand(percent: number): string {
 	if (percent >= 95) return `${percent}% (critical)`;
 	if (percent >= 90) return `${percent}% (high)`;
 	if (percent >= 80) return `${percent}% (warning)`;

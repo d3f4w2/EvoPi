@@ -1,0 +1,43 @@
+name: CI
+
+# EvoPi 的质量门禁：每次 push / PR 跑测试。
+# 关键：这条流水线**完全自洽**——不需要 pi/ 参考仓、不需要模型 key、不联网。
+# tests/ 直接 import 真实扩展模块，Pi 的 `import type` 运行时被擦除，tsx 直接跑真码。
+# typecheck 需要 pi/（CI 里没有）→ 脚本会优雅跳过，不让 CI 失败。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支新推送自动取消旧的在跑任务，省额度。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install (hermetic — 只装 tsx)
+        run: npm ci
+
+      - name: Test (49 断言，跑真实扩展模块)
+        run: npm test
+
+      - name: Typecheck (需要 pi/ 参考仓；CI 无 → 自动跳过，不失败)
+        run: npm run typecheck

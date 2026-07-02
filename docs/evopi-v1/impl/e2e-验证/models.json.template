@@ -1,0 +1,33 @@
+{
+  "//": "EvoPi 端到端验证用的 custom provider（智谱网关 · OpenAI 兼容）。",
+  "//apiKey": "用 $ZHIPU_API_KEY 环境变量插值——不要把明文 key 写进本文件。",
+  "//model": "glm-4-flash 实测稳定；网关 /v1/models 里没有 glm-5-turbo-nothinking，只有 glm-5-turbo。",
+  "providers": {
+    "zhipu": {
+      "name": "Zhipu GLM (gateway)",
+      "baseUrl": "https://new-api.shaguabijia.com/v1",
+      "apiKey": "$ZHIPU_API_KEY",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "glm-4-flash",
+          "name": "GLM-4 Flash",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0.1, "output": 0.2, "cacheRead": 0.01, "cacheWrite": 0.1 },
+          "contextWindow": 128000,
+          "maxTokens": 4096
+        },
+        {
+          "id": "glm-5-turbo",
+          "name": "GLM-5 Turbo",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0.1, "output": 0.2, "cacheRead": 0.01, "cacheWrite": 0.1 },
+          "contextWindow": 128000,
+          "maxTokens": 4096
+        }
+      ]
+    }
+  }
+}
