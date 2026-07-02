@@ -2,7 +2,7 @@
 
 > ADR = Architecture Decision Record。**一个重要决策一篇**，记录：背景、备选、决定、理由、影响。
 >
-> 什么时候写：定性为 **B 架构优化** 或 **C 推翻旧决策** 的输入（见[演化流程](../演化流程.md)第③步）。纯加法的新功能不用写 ADR，进[路线图](../V2路线图.md)即可。
+> 什么时候写：定性为 **B 架构优化** 或 **C 推翻旧决策** 的输入（见 [evolution-harness skill](../../../.claude/skills/evolution-harness/SKILL.md) 五步漏斗第③步）。纯加法的新功能不用写 ADR，进[路线图](../V2路线图.md)即可。
 
 ## 为什么写 ADR
 
