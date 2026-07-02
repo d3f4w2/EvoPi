@@ -20,6 +20,7 @@ import { registerCost } from "./cost";
 import { registerEval } from "./eval";
 import { registerJob } from "./job";
 import { registerMemory } from "./memory";
+import { registerRag } from "./rag";
 import { registerSkill } from "./skill";
 import { createTools } from "./tools";
 import {
@@ -51,6 +52,9 @@ export default function evopiTraceExtension(pi: ExtensionAPI) {
 
 	// 模块 6：评测协作 —— /evopi-eval（确定性评分 / golden task / 子代理 spawn / 棘轮门禁）。
 	registerEval(pi, shared);
+
+	// V2 增量：Codebase RAG —— context 钩子做本地代码预检索注入（与 memory 注入并存）+ /evopi-rag。
+	registerRag(pi, shared);
 
 	pi.registerCommand("evopi-trace", {
 		description: "Show EvoPi trace status",

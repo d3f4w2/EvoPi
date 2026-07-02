@@ -7,6 +7,7 @@ import "./policy.test";
 import "./eval.test";
 import "./cost.test";
 import "./trace.test";
+import "./rag.test";
 import { runAll } from "./harness";
 
 const summary = runAll();
