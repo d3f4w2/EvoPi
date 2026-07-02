@@ -128,6 +128,7 @@ EvoPi/
 │   ├── tools.ts                   #   ⑤ 工具运行时
 │   └── eval.ts / subagent.ts      #   ⑥ 评测协作
 ├── docs/evopi-v1/                 # 设计文档（7 模块 + 整体架构 + 面试叙事）
+├── docs/evopi-v2/                 # 演化机制（灵感池 / 路线图 / ADR / 演化流程）
 └── pi/                            # Pi 编码 agent 参考仓（只读；已 gitignore 其 node_modules）
 ```
 
@@ -139,6 +140,7 @@ EvoPi/
 - ✅ **端到端跑通**：真 Pi + 真模型，扩展真实加载、生命周期事件 + `cost.request`（真实 usage）落盘。
 - ⬜ **已知边界**：`tool.call` / `policy.*` / `compact.*` 等事件的**真 Pi 触发**尚未全部录取（逻辑与写盘路径已被离线测试覆盖）；默认 policy 的 `curl … | sh` 是字面子串匹配、带 URL 时会漏判（见 [tests/policy.test.ts](tests/policy.test.ts) 里那条诚实断言，待 V2 收紧为正则）；工具级超时（AbortController）因 Pi API 限制留 V2。
 - 📌 这是一个**学习 + 作品**性质的项目：目标是把「治理型 agent」这件事从设计一路做到可跑、可测、可演示，并把过程中的真实取舍记录下来。
+- 🔄 **V2 演化机制**：项目不是一次性交付，而是持续演化。新输入（文章 / 开源项目 / 灵感 / 架构反思）怎么有序改造项目、决策怎么留痕，见 [docs/evopi-v2/](docs/evopi-v2/)（灵感池 / 路线图 / 架构决策记录 ADR）。
 
 ## License
 
